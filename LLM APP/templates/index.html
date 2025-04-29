@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Application with GROQ API</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        #fileList {
+            margin-top: 15px;
+        }
+        #results {
+            white-space: pre-wrap;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            margin: 8px 0;
+            box-sizing: border-box;
+        }
+        .file-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+        }
+        .chart-container img {
+            max-width: 100%;
+            height: auto;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        .loading {
+            color: #666;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <h1>LLM Application with GROQ API</h1>
+    
+    <div class="section" id="uploadSection">
+        <h2>Upload Documents</h2>
+        <form id="uploadForm" enctype="multipart/form-data">
+            <label for="fileInput">Select a file (CSV, XLSX, PDF, PPTX, DOCX):</label>
+            <input type="file" id="fileInput" name="file" accept=".csv,.xlsx,.pdf,.pptx,.docx">
+            <button type="submit">Upload</button>
+        </form>
+    </div>
+    
+    <div class="section" id="filesSection">
+        <h2>Loaded Files</h2>
+        <div id="fileList">
+            Loading...
+        </div>
+    </div>
+    
+    <div class="section" id="querySection">
+        <h2>Ask a Question</h2>
+        <textarea id="queryInput" rows="3" placeholder="Your question about the uploaded documents..."></textarea>
+        <button id="queryBtn" type="button">Submit</button>
+    </div>
+    
+    <div class="section" id="resultsSection">
+        <h2>Results</h2>
+        <div id="resultsContainer">
+            <div id="results">Ask a question to see results here.</div>
+            <div id="chartContainer" class="chart-container"></div>
+        </div>
+    </div>
+
+    <script>
+        // Fetch and display loaded files
+        function loadFiles() {
+            fetch('/files')
+                .then(response => response.json())
+                .then(files => {
+                    const fileList = document.getElementById('fileList');
+                    if (files.length === 0) {
+                        fileList.innerHTML = '<p>No files uploaded yet.</p>';
+                    } else {
+                        let html = '';
+                        files.forEach(file => {
+                            html += `<div class="file-item">
+                                <strong>${file.file_name}</strong> (${file.file_type})
+                                <br>Chunks: ${file.chunks}
+                            </div>`;
+                        });
+                        fileList.innerHTML = html;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading files:', error);
+                    document.getElementById('fileList').innerHTML = 
+                        '<p class="error">Error loading files. Please try refreshing the page.</p>';
+                });
+        }
+
+        // Handle file upload
+        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('fileInput');
+            if (!fileInput.files[0]) {
+                alert('Please select a file to upload.');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            
+            document.getElementById('fileList').innerHTML = '<p class="loading">Uploading file, please wait...</p>';
+            
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok: ' + response.statusText);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Upload successful:', data);
+                loadFiles();
+                fileInput.value = '';
+            })
+            .catch(error => {
+                console.error('Error uploading file:', error);
+                document.getElementById('fileList').innerHTML = 
+                    '<p class="error">Error uploading file: ' + error.message + '</p>';
+            });
+        });
+
+        // Handle query submission
+        document.getElementById('queryBtn').addEventListener('click', function() {
+            const query = document.getElementById('queryInput').value.trim();
+            
+            if (!query) {
+                alert('Please enter a question.');
+                return;
+            }
+            
+            document.getElementById('results').innerHTML = '<p class="loading">Processing your query, please wait...</p>';
+            document.getElementById('chartContainer').innerHTML = '';
+            
+            fetch('/query', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ query: query })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok: ' + response.statusText);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Query response:', data);
+                displayResults(data);
+            })
+            .catch(error => {
+                console.error('Error processing query:', error);
+                document.getElementById('results').innerHTML = 
+                    '<p class="error">Error processing query: ' + error.message + '</p>';
+            });
+        });
+
+        // Display query results
+        function displayResults(data) {
+            const resultsDiv = document.getElementById('results');
+            const chartContainer = document.getElementById('chartContainer');
+            
+            // Clear previous results
+            chartContainer.innerHTML = '';
+            
+            if (data.analysis && data.analysis.response_type) {
+                // Handle different types of responses
+                const responseType = data.analysis.response_type;
+                
+                if (responseType === 'chart') {
+                    // Display chart
+                    if (data.analysis.content) {
+                        const img = document.createElement('img');
+                        img.src = 'data:image/png;base64,' + data.analysis.content;
+                        img.alt = data.analysis.description || 'Data visualization';
+                        chartContainer.appendChild(img);
+                        
+                        // Add chart info below image
+                        const chartInfo = document.createElement('div');
+                        chartInfo.className = 'chart-info';
+                        chartInfo.innerHTML = `
+                            <p><strong>Chart Type:</strong> ${data.analysis.chart_type || 'Line'}</p>
+                            <p><strong>Description:</strong> ${data.analysis.description || 'No description available'}</p>
+                            <p><strong>Columns Used:</strong> ${data.analysis.columns_used?.join(', ') || 'N/A'}</p>
+                        `;
+                        chartContainer.appendChild(chartInfo);
+                    }
+                    
+                    // Display explanation
+                    resultsDiv.innerHTML = data.explanation || 'Chart generated based on your query.';
+                } else if (responseType === 'forecast') {
+                    // Handle forecast
+                    if (data.analysis.chart && data.analysis.chart.content) {
+                        const img = document.createElement('img');
+                        img.src = 'data:image/png;base64,' + data.analysis.chart.content;
+                        img.alt = data.analysis.chart.description || 'Forecast visualization';
+                        chartContainer.appendChild(img);
+                        
+                        // Add forecast data table
+                        if (data.analysis.data && data.analysis.data.length > 0) {
+                            const tableDiv = document.createElement('div');
+                            tableDiv.className = 'forecast-table';
+                            
+                            const table = document.createElement('table');
+                            table.className = 'forecast-data';
+                            
+                            // Create header
+                            const thead = document.createElement('thead');
+                            const headerRow = document.createElement('tr');
+                            const headers = Object.keys(data.analysis.data[0]);
+                            
+                            headers.forEach(header => {
+                                const th = document.createElement('th');
+                                th.textContent = header;
+                                headerRow.appendChild(th);
+                            });
+                            
+                            thead.appendChild(headerRow);
+                            table.appendChild(thead);
+                            
+                            // Create body
+                            const tbody = document.createElement('tbody');
+                            data.analysis.data.forEach(row => {
+                                const tr = document.createElement('tr');
+                                headers.forEach(header => {
+                                    const td = document.createElement('td');
+                                    td.textContent = row[header];
+                                    tr.appendChild(td);
+                                });
+                                tbody.appendChild(tr);
+                            });
+                            
+                            table.appendChild(tbody);
+                            tableDiv.appendChild(table);
+                            chartContainer.appendChild(tableDiv);
+                        }
+                    }
+                    
+                    // Display explanation
+                    resultsDiv.innerHTML = data.explanation || 'Forecast generated based on your query.';
+                } else if (responseType === 'export') {
+                    // Handle exports
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,' + 
+                                    data.analysis.content;
+                    downloadLink.download = data.analysis.filename || 'export.xlsx';
+                    downloadLink.textContent = 'Download Exported Data';
+                    downloadLink.className = 'download-btn';
+                    
+                    resultsDiv.innerHTML = '<p>Your data export is ready: </p>';
+                    resultsDiv.appendChild(downloadLink);
+                } else if (responseType === 'trend') {
+                    // Handle trend analysis
+                    if (data.analysis.chart && data.analysis.chart.content) {
+                        const img = document.createElement('img');
+                        img.src = 'data:image/png;base64,' + data.analysis.chart.content;
+                        img.alt = data.analysis.chart.description || 'Trend visualization';
+                        chartContainer.appendChild(img);
+                        
+                        // Add trend info if available
+                        if (data.analysis.trends) {
+                            const trendDiv = document.createElement('div');
+                            trendDiv.className = 'trend-info';
+                            
+                            let trendHtml = '<h4>Trend Analysis</h4>';
+                            for (const [column, stats] of Object.entries(data.analysis.trends)) {
+                                trendHtml += `<div class="trend-item">
+                                    <h5>${column}</h5>
+                                    <p>First value: ${stats.first_value}</p>
+                                    <p>Last value: ${stats.last_value}</p>
+                                    <p>Change: ${stats.change.toFixed(2)}</p>
+                                    <p>Percent change: ${stats.pct_change.toFixed(2)}%</p>
+                                </div>`;
+                            }
+                            
+                            trendDiv.innerHTML = trendHtml;
+                            chartContainer.appendChild(trendDiv);
+                        }
+                    }
+                    
+                    // Display explanation
+                    resultsDiv.innerHTML = data.explanation || 'Trend analysis generated based on your query.';
+                } else {
+                    // Text response or other types
+                    resultsDiv.innerHTML = data.explanation || data.analysis.content || 'No results found.';
+                }
+            } else if (data.response) {
+                // Simple text response from LLM
+                resultsDiv.innerHTML = data.response;
+            } else {
+                resultsDiv.innerHTML = 'Received response but no readable content. Check console for details.';
+                console.log('Unhandled response format:', data);
+            }
+        }
+
+        // Load files on page load
+        document.addEventListener('DOMContentLoaded', loadFiles);
+    </script>
+</body>
+</html>
